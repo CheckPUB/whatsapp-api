@@ -6,7 +6,50 @@ const bodyParser = require('body-parser');
 
 const app = express();
 app.use(bodyParser.json());
+const { Client, LocalAuth } = require('whatsapp-web.js');
+const qrcode = require('qrcode-terminal');
+const QRCode = require('qrcode');
+const express = require('express');
+const bodyParser = require('body-parser');
 
+const app = express();
+app.use(bodyParser.json());
+
+// ==================== SÉCURITÉ API ====================
+const API_KEY = process.env.API_KEY || 'checkpub-34977509:secret_cp509';
+
+// Middleware de vérification de la clé API
+app.use((req, res, next) => {
+    // Routes publiques (pas besoin d'authentification)
+    if (req.path === '/' || req.path === '/qr') {
+        return next();
+    }
+    
+    // Pour toutes les autres routes, vérifier la clé API
+    const providedKey = req.headers['x-api-key'] || req.headers['authorization'];
+    
+    if (!providedKey) {
+        return res.status(401).json({ 
+            success: false,
+            message: 'Clé API manquante. Ajoutez "X-API-Key" dans les headers.' 
+        });
+    }
+    
+    // Vérification de la clé
+    if (providedKey !== API_KEY && providedKey !== `Bearer ${API_KEY}`) {
+        return res.status(403).json({ 
+            success: false,
+            message: 'Clé API invalide.' 
+        });
+    }
+    
+    next();
+});
+// ======================================================
+
+const PORT = process.env.PORT || 3000;
+
+// ... Le reste du code reste identique
 const PORT = process.env.PORT || 3000;
 
 // Initialiser le client WhatsApp
