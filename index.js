@@ -6,14 +6,6 @@ const bodyParser = require('body-parser');
 
 const app = express();
 app.use(bodyParser.json());
-const { Client, LocalAuth } = require('whatsapp-web.js');
-const qrcode = require('qrcode-terminal');
-const QRCode = require('qrcode');
-const express = require('express');
-const bodyParser = require('body-parser');
-
-const app = express();
-app.use(bodyParser.json());
 
 // ==================== SÉCURITÉ API ====================
 const API_KEY = process.env.API_KEY || 'checkpub-34977509:secret_cp509';
@@ -47,9 +39,6 @@ app.use((req, res, next) => {
 });
 // ======================================================
 
-const PORT = process.env.PORT || 3000;
-
-// ... Le reste du code reste identique
 const PORT = process.env.PORT || 3000;
 
 // Initialiser le client WhatsApp
