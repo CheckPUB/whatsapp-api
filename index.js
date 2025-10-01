@@ -3,8 +3,18 @@ const qrcode = require('qrcode-terminal');
 const QRCode = require('qrcode');
 const express = require('express');
 const bodyParser = require('body-parser');
+const cors = require('cors');
 
 const app = express();
+
+// ==================== ACTIVER CORS ====================
+app.use(cors({
+    origin: '*', // Permet toutes les origines (vous pouvez restreindre plus tard)
+    methods: ['GET', 'POST', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-API-Key', 'Authorization']
+}));
+// ======================================================
+
 app.use(bodyParser.json());
 
 // ==================== SÉCURITÉ API ====================
