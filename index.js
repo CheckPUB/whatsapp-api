@@ -344,7 +344,7 @@ app.post('/send-message', async (req, res) => {
 
     try {
         const chatId = number.includes('@c.us') ? number : `${number}@c.us`;
-        await client.sendMessage(chatId, message);
+        await client.sendMessage(chatId, message, { linkPreview: true });
         
         res.json({ 
             success: true, 
