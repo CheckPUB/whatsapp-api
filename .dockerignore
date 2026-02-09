@@ -1,0 +1,12 @@
+node_modules
+npm-debug.log
+.env
+.git
+.gitignore
+README.md
+README_FIX_2026.md
+SOLUTION_URGENTE.md
+.wwebjs_auth
+.wwebjs_cache
+*.png
+*.jpg
