@@ -9,7 +9,7 @@ const app = express();
 
 // ==================== ACTIVER CORS ====================
 app.use(cors({
-    origin: '*', // Permet toutes les origines (vous pouvez restreindre plus tard)
+    origin: '*',
     methods: ['GET', 'POST', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'X-API-Key', 'Authorization']
 }));
@@ -20,14 +20,11 @@ app.use(bodyParser.json());
 // ==================== SÉCURITÉ API ====================
 const API_KEY = process.env.API_KEY || 'checkpub-34977509:secret_cp509';
 
-// Middleware de vérification de la clé API
 app.use((req, res, next) => {
-    // Routes publiques (pas besoin d'authentification)
-    if (req.path === '/' || req.path === '/qr') {
+    if (req.path === '/' || req.path === '/qr' || req.path === '/health') {
         return next();
     }
     
-    // Pour toutes les autres routes, vérifier la clé API
     const providedKey = req.headers['x-api-key'] || req.headers['authorization'];
     
     if (!providedKey) {
@@ -37,7 +34,6 @@ app.use((req, res, next) => {
         });
     }
     
-    // Vérification de la clé
     if (providedKey !== API_KEY && providedKey !== `Bearer ${API_KEY}`) {
         return res.status(403).json({ 
             success: false,
@@ -51,9 +47,12 @@ app.use((req, res, next) => {
 
 const PORT = process.env.PORT || 3000;
 
-// Initialiser le client WhatsApp
+// ==================== FIX POUR 2026 ====================
+// Configuration Puppeteer optimisée pour Render + WhatsApp 2026
 const client = new Client({
-    authStrategy: new LocalAuth(),
+    authStrategy: new LocalAuth({
+        dataPath: './.wwebjs_auth'
+    }),
     puppeteer: {
         headless: true,
         args: [
@@ -64,34 +63,58 @@ const client = new Client({
             '--no-first-run',
             '--no-zygote',
             '--single-process',
-            '--disable-gpu'
-        ]
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        ],
+        executablePath: process.env.CHROME_BIN || undefined
+    },
+    // CRITIQUE : WebVersion spécifique pour éviter les problèmes 2026
+    webVersionCache: {
+        type: 'remote',
+        remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
     }
 });
+// ======================================================
 
 let isReady = false;
 let qrCodeData = '';
 let qrCodeImage = '';
+let initializationTime = Date.now();
+let lastQRTime = null;
+
+// Timeout de QR code (3 minutes)
+const QR_TIMEOUT = 180000;
 
 // Générer le QR code
 client.on('qr', async (qr) => {
-    console.log('QR Code reçu !');
+    console.log('🔲 QR Code reçu !', new Date().toISOString());
+    lastQRTime = Date.now();
     qrCodeData = qr;
     qrcode.generate(qr, { small: true });
     
-    // Générer l'image QR en base64
     try {
         qrCodeImage = await QRCode.toDataURL(qr);
         console.log('✅ QR Code disponible sur /qr');
     } catch (err) {
-        console.error('Erreur génération QR:', err);
+        console.error('❌ Erreur génération QR:', err);
     }
 });
 
 // Client prêt
 client.on('ready', () => {
-    console.log('✅ Client WhatsApp prêt !');
+    console.log('✅ Client WhatsApp prêt !', new Date().toISOString());
     isReady = true;
+    qrCodeData = '';
+    qrCodeImage = '';
+    lastQRTime = null;
+});
+
+// Gestion des erreurs d'authentification
+client.on('auth_failure', (msg) => {
+    console.error('❌ Échec d\'authentification:', msg);
+    isReady = false;
     qrCodeData = '';
     qrCodeImage = '';
 });
@@ -100,17 +123,45 @@ client.on('ready', () => {
 client.on('disconnected', (reason) => {
     console.log('❌ Client déconnecté:', reason);
     isReady = false;
+    qrCodeData = '';
+    qrCodeImage = '';
+    
+    // Tentative de reconnexion après 5 secondes
+    setTimeout(() => {
+        console.log('🔄 Tentative de reconnexion...');
+        client.initialize();
+    }, 5000);
+});
+
+// Gestion des erreurs de chargement
+client.on('loading_screen', (percent, message) => {
+    console.log('⏳ Chargement:', percent, '%', message);
 });
 
 // Initialiser le client
-client.initialize();
+console.log('🚀 Initialisation du client WhatsApp...');
+client.initialize().catch(err => {
+    console.error('❌ Erreur d\'initialisation:', err);
+});
+
+// Health check pour Render
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', uptime: process.uptime() });
+});
 
 // Route pour vérifier le statut
 app.get('/', (req, res) => {
+    const uptime = Date.now() - initializationTime;
+    const qrAge = lastQRTime ? Date.now() - lastQRTime : null;
+    
     res.json({
         status: 'online',
         whatsappReady: isReady,
-        message: 'API WhatsApp fonctionnelle'
+        qrCodeAvailable: !!qrCodeImage,
+        qrCodeAge: qrAge ? Math.floor(qrAge / 1000) + 's' : null,
+        uptime: Math.floor(uptime / 1000) + 's',
+        message: 'API WhatsApp fonctionnelle',
+        version: '2.0.0 (Fix 2026)'
     });
 });
 
@@ -122,6 +173,7 @@ app.get('/qr', (req, res) => {
             <html>
             <head>
                 <title>WhatsApp Connecté</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
                 <style>
                     body {
                         font-family: Arial, sans-serif;
@@ -151,13 +203,17 @@ app.get('/qr', (req, res) => {
             <body>
                 <div class="container">
                     <div class="emoji">✅</div>
-                    <h1>WhatsApp est déjà connecté !</h1>
+                    <h1>WhatsApp est connecté !</h1>
                     <p>Votre API est prête à envoyer des messages.</p>
+                    <p style="color: #666; font-size: 14px; margin-top: 20px;">Version 2.0.0 (Fix 2026)</p>
                 </div>
             </body>
             </html>
         `);
     } else if (qrCodeImage) {
+        const qrAge = lastQRTime ? Math.floor((Date.now() - lastQRTime) / 1000) : 0;
+        const timeLeft = Math.max(0, 180 - qrAge);
+        
         res.send(`
             <!DOCTYPE html>
             <html>
@@ -231,9 +287,37 @@ app.get('/qr', (req, res) => {
                     .refresh:hover {
                         background: #20BA5A;
                     }
+                    .timer {
+                        color: #ff6b6b;
+                        font-weight: bold;
+                        font-size: 18px;
+                        margin: 10px 0;
+                    }
+                    .warning {
+                        background: #fff3cd;
+                        border: 1px solid #ffc107;
+                        padding: 15px;
+                        border-radius: 5px;
+                        margin: 15px 0;
+                        color: #856404;
+                    }
                 </style>
                 <script>
-                    // Auto-refresh toutes les 5 secondes pour vérifier la connexion
+                    let timeLeft = ${timeLeft};
+                    
+                    function updateTimer() {
+                        const timerEl = document.getElementById('timer');
+                        if (timeLeft > 0) {
+                            timerEl.textContent = timeLeft + 's';
+                            timeLeft--;
+                        } else {
+                            location.reload();
+                        }
+                    }
+                    
+                    setInterval(updateTimer, 1000);
+                    
+                    // Auto-refresh toutes les 5 secondes
                     setTimeout(() => {
                         location.reload();
                     }, 5000);
@@ -243,8 +327,12 @@ app.get('/qr', (req, res) => {
                 <div class="container">
                     <h1>📱 Connecter WhatsApp</h1>
                     <p class="instructions">
-                        Scannez ce QR code avec votre téléphone pour connecter WhatsApp à l'API
+                        Scannez ce QR code avec votre téléphone
                     </p>
+                    
+                    <div class="warning">
+                        ⚠️ <strong>Important :</strong> Scannez rapidement ! Le QR code expire dans <span id="timer" class="timer">${timeLeft}s</span>
+                    </div>
                     
                     <div class="qr-container">
                         <img src="${qrCodeImage}" alt="QR Code WhatsApp" />
@@ -256,15 +344,19 @@ app.get('/qr', (req, res) => {
                             <li>Ouvrez <strong>WhatsApp</strong> sur votre téléphone</li>
                             <li>Allez dans <strong>Paramètres</strong> → <strong>Appareils connectés</strong></li>
                             <li>Appuyez sur <strong>"Connecter un appareil"</strong></li>
-                            <li>Scannez le QR code ci-dessus</li>
+                            <li>Scannez le QR code ci-dessus <strong>rapidement</strong></li>
                         </ol>
                     </div>
                     
                     <p style="color: #999; font-size: 14px;">
-                        ⏱️ La page se rafraîchit automatiquement...
+                        ⏱️ La page se rafraîchit automatiquement toutes les 5s
                     </p>
                     
-                    <a href="/qr" class="refresh">🔄 Rafraîchir manuellement</a>
+                    <a href="/qr" class="refresh">🔄 Rafraîchir maintenant</a>
+                    
+                    <p style="color: #999; font-size: 12px; margin-top: 20px;">
+                        Version 2.0.0 (Fix 2026)
+                    </p>
                 </div>
             </body>
             </html>
@@ -275,6 +367,7 @@ app.get('/qr', (req, res) => {
             <html>
             <head>
                 <title>Initialisation...</title>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
                 <style>
                     body {
                         font-family: Arial, sans-serif;
@@ -316,7 +409,10 @@ app.get('/qr', (req, res) => {
                 <div class="container">
                     <div class="loader"></div>
                     <h2>Initialisation en cours...</h2>
-                    <p>Le QR code sera disponible dans quelques secondes.</p>
+                    <p>Le QR code sera disponible dans quelques instants.</p>
+                    <p style="color: #999; font-size: 12px; margin-top: 20px;">
+                        Cela peut prendre 30-60 secondes sur Render...
+                    </p>
                 </div>
             </body>
             </html>
@@ -365,4 +461,5 @@ app.post('/send-message', async (req, res) => {
 app.listen(PORT, () => {
     console.log(`🚀 Serveur démarré sur le port ${PORT}`);
     console.log(`📱 Accédez au QR code sur : http://localhost:${PORT}/qr`);
+    console.log(`🌍 En production : https://votre-app.onrender.com/qr`);
 });
